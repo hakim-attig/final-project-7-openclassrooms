@@ -9,8 +9,7 @@ app = FastAPI(
     version="1.0"
 )
 
-MODEL_DIR = r"C:\Users\amine\Desktop\projet_openclassrooms\projet_scoring_credit\models"
-
+MODEL_DIR = "../models"
 # Chargement des modèles
 try:
     model = joblib.load(f"{MODEL_DIR}/champion_model.pkl")
