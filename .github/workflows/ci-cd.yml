@@ -38,13 +38,13 @@ jobs:
       - name: 🚀 Start FastAPI in background
         working-directory: ./api
         run: |
-          uvicorn main:app --host 127.0.0.1 --port 8000 &
+          nohup uvicorn main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
           sleep 5  # attendre que l'API soit prête
 
       - name: 🧪 Run unit tests
         working-directory: ./api
         run: |
-          pytest test_api.py -v --cov=main --cov-report=xml --cov-report=html
+          pytest test_api.py --cov=main --cov-report=xml --cov-report=html
 
       - name: 📊 Check test coverage
         working-directory: ./api
