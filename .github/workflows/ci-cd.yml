@@ -10,42 +10,42 @@ jobs:
   test:
     name: Tests Automatisés
     runs-on: ubuntu-latest
-    
+
     steps:
-      - name: Checkout code
+      - name: 📥 Checkout code
         uses: actions/checkout@v3
-      
-      - name: Set up Python 3.9
+
+      - name: 🐍 Set up Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      
-      - name: Cache pip dependencies
+
+      - name: 💾 Cache pip dependencies
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('api/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
-      
-      - name: Install dependencies
+
+      - name: 📦 Install dependencies
+        working-directory: ./api
         run: |
           python -m pip install --upgrade pip
-          cd api
           pip install -r requirements.txt
           pip install pytest pytest-cov
-      
-      - name: Run unit tests
+
+      - name: 🧪 Run unit tests
+        working-directory: ./api
         run: |
-          cd api
           pytest test_api.py -v --cov=main --cov-report=xml --cov-report=html
-      
-      - name: Check test coverage
+
+      - name: 📊 Check test coverage
+        working-directory: ./api
         run: |
-          cd api
           coverage report --fail-under=70
-      
-      - name: Notify on test failure
+
+      - name: 🚨 Notify on test failure
         if: failure()
         run: |
           echo "❌ Tests échoués ! Déploiement bloqué."
@@ -55,21 +55,21 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
+
     steps:
-      - name: Checkout code
+      - name: 📥 Checkout code
         uses: actions/checkout@v3
-      
-      - name: Trigger Render deployment
+
+      - name: 🚀 Trigger Render deployment
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
         run: |
           curl -X POST $RENDER_DEPLOY_HOOK
-      
-      - name: Wait for deployment
+
+      - name: ⏳ Wait for deployment
         run: sleep 60
-      
-      - name: Health check API
+
+      - name: 🩺 Health check API
         run: |
           response=$(curl -s -o /dev/null -w "%{http_code}" https://api-scoring-credit-final.onrender.com/status)
           if [ $response -eq 200 ]; then
@@ -78,14 +78,14 @@ jobs:
             echo "❌ API non accessible. Code HTTP : $response"
             exit 1
           fi
-      
-      - name: Deployment success
+
+      - name: ✅ Deployment success
         if: success()
         run: |
           echo "🎉 Déploiement réussi !"
           echo "🌐 API : https://api-scoring-credit-final.onrender.com"
-      
-      - name: Deployment failure
+
+      - name: ❌ Deployment failure
         if: failure()
         run: |
           echo "❌ Déploiement échoué !"
@@ -95,9 +95,9 @@ jobs:
     needs: [test, deploy]
     runs-on: ubuntu-latest
     if: always()
-    
+
     steps:
-      - name: Summary
+      - name: 📝 Summary
         run: |
           echo "════════════════════════════════"
           echo "   RÉSUMÉ PIPELINE CI/CD         "
