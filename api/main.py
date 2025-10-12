@@ -28,7 +28,7 @@ class PredictionRequest(BaseModel):
 @app.get("/")
 def root():
     return {
-        "api": "Scoring Crédit Production",
+        "api": "Scoring Crédit Production V2.0",
         "model": metadata['model_type'] if model_loaded else "Non chargé",
         "num_features": len(feature_columns) if model_loaded else 0,
         "status": "OK" if model_loaded else "ERROR"
