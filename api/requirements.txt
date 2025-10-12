@@ -22,3 +22,6 @@ shap==0.42.1
 
 # Additional dependencies
 scipy==1.11.2
+
+# Testing
+httpx
