@@ -1,4 +1,4 @@
-# API Core
+# API Core v2
 fastapi==0.118.0
 uvicorn==0.37.0
 pydantic==2.11.10
