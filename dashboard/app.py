@@ -10,7 +10,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "http://localhost:8000"
+API_URL = "https://api-scoring-credit-final.onrender.com"
 
 try:
     response = requests.get(f"{API_URL}/status", timeout=2)
