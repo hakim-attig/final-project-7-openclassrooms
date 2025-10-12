@@ -10,6 +10,7 @@ app = FastAPI(
 )
 
 MODEL_DIR = "../models"
+
 # Chargement des modèles
 try:
     model = joblib.load(f"{MODEL_DIR}/champion_model.pkl")
@@ -41,6 +42,19 @@ def health_check():
         "model_loaded": model_loaded
     }
 
+@app.get("/model/info")
+def model_info():
+    if not model_loaded:
+        raise HTTPException(status_code=500, detail="Modèle non chargé")
+    return {
+        "model_type": metadata['model_type'],
+        "auc_score": float(metadata['auc_score']),
+        "optimal_threshold": float(threshold),
+        "optimal_cost": float(metadata['optimal_cost']),
+        "num_features": len(feature_columns),
+        "training_date": metadata['training_date']
+    }
+
 @app.post("/predict")
 def predict(request: PredictionRequest):
     if not model_loaded:
@@ -48,23 +62,18 @@ def predict(request: PredictionRequest):
     
     if len(request.features) != len(feature_columns):
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Nombre de features incorrect. Attendu: {len(feature_columns)}, Reçu: {len(request.features)}"
         )
     
-    try:
-        features_array = np.array(request.features).reshape(1, -1)
-        proba = model.predict_proba(features_array)[0, 1]
-        decision = "REFUS" if proba >= threshold else "ACCORD"
-        
-        return {
-            "risk_score": float(proba),
-            "risk_percentage": f"{proba*100:.2f}%",
-            "threshold": float(threshold),
-            "decision": decision
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    features_array = np.array(request.features).reshape(1, -1)
+    proba = model.predict_proba(features_array)[0, 1]
+    decision = "REFUS" if proba >= threshold else "ACCORD"
+    
+    return {
+        "risk_score": float(proba),
+        "decision": decision
+    }
 
 @app.post("/explain")
 def explain_prediction(request: PredictionRequest):
@@ -73,15 +82,11 @@ def explain_prediction(request: PredictionRequest):
         raise HTTPException(status_code=500, detail="Service non disponible")
     
     if len(request.features) != len(feature_columns):
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Nombre de features incorrect"
-        )
+        raise HTTPException(status_code=400, detail="Nombre de features incorrect")
     
     try:
         import shap
         explainer = joblib.load(f"{MODEL_DIR}/shap_explainer.pkl")
-        
         features_array = np.array(request.features).reshape(1, -1)
         shap_values = explainer.shap_values(features_array)
         
@@ -106,23 +111,8 @@ def explain_prediction(request: PredictionRequest):
             "top_features": top_features,
             "interpretation": "Impact positif = augmente le risque de défaut | Impact négatif = diminue le risque"
         }
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur SHAP: {str(e)}")
-
-@app.get("/model/info")
-def model_info():
-    if not model_loaded:
-        raise HTTPException(status_code=500, detail="Modèle non chargé")
-    
-    return {
-        "model_type": metadata['model_type'],
-        "auc_score": float(metadata['auc_score']),
-        "optimal_threshold": float(threshold),
-        "optimal_cost": float(metadata['optimal_cost']),
-        "num_features": len(feature_columns),
-        "training_date": metadata['training_date']
-    }
 
 if __name__ == "__main__":
     import uvicorn

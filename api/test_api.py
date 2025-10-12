@@ -23,7 +23,7 @@ def test_status_endpoint():
     """Teste le health check"""
     response = client.get("/status")
     assert response.status_code == 200
-    assert response.json()["status"] == "operational"  # CORRIGÉ
+    assert response.json()["status"] == "operational"
 
 
 def test_model_info_endpoint():
@@ -32,7 +32,7 @@ def test_model_info_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert "model_type" in data
-    assert "auc_score" in data  # CORRIGÉ (c'était "auc")
+    assert "auc_score" in data
     assert data["model_type"] == "lightgbm"
 
 
@@ -40,10 +40,9 @@ def test_predict_valid_features():
     """Teste une prédiction avec 254 features valides"""
     features = [0.5] * 254
     response = client.post("/predict", json={"features": features})
-    
     assert response.status_code == 200
+
     data = response.json()
-    
     assert "risk_score" in data
     assert "decision" in data
     assert 0 <= data["risk_score"] <= 1
@@ -74,8 +73,7 @@ def test_explain_invalid_feature_count():
 def test_predict_deterministic():
     """Vérifie que le modèle est déterministe"""
     features = [0.7] * 254
-    
     response1 = client.post("/predict", json={"features": features})
     response2 = client.post("/predict", json={"features": features})
-    
+
     assert response1.json()["risk_score"] == response2.json()["risk_score"]
