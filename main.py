@@ -1,95 +1,60 @@
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List
-import joblib
+import lightgbm as lgb
+import shap
 import numpy as np
 
-# =======================
-# Chemins des fichiers
-# =======================
-MODEL_DIR = "models"
-MODEL_FILE = f"{MODEL_DIR}/champion_model.pkl"
-THRESHOLD_FILE = f"{MODEL_DIR}/champion_threshold.pkl"
-FEATURES_FILE = f"{MODEL_DIR}/feature_columns.pkl"
-EXPLAINER_FILE = f"{MODEL_DIR}/shap_explainer.pkl"
+# --- INITIALISATION DE L'API ---
+app = FastAPI(title="API Scoring Crédit", version="1.0")
 
-# =======================
-# Chargement du modèle et SHAP explainer
-# =======================
-model = joblib.load(MODEL_FILE)
-threshold = joblib.load(THRESHOLD_FILE)
-feature_names = joblib.load(FEATURES_FILE)
-explainer = joblib.load(EXPLAINER_FILE)
+# --- CHARGEMENT DU MODÈLE ---
+MODEL_PATH = "model.txt"  # remplace par le chemin vers ton modèle LightGBM
+model = lgb.Booster(model_file=MODEL_PATH)
 
-# =======================
-# FastAPI app
-# =======================
-app = FastAPI(title="API Scoring Crédit")
+# --- CRÉATION DE L'EXPLAINER SHAP AU DÉMARRAGE ---
+explainer = shap.TreeExplainer(model)
 
-# =======================
-# Models Pydantic
-# =======================
+# --- SCHÉMA DES FEATURES ---
 class Features(BaseModel):
     features: List[float]
 
-# =======================
-# Endpoints
-# =======================
+# --- ENDPOINT /status ---
 @app.get("/status")
 def status():
     return {"status": "operational"}
 
-@app.get("/model/info")
-def model_info():
-    # Exemple d'info, adapte selon ton modèle
-    auc_score = 0.85
-    optimal_cost = 10000
-    return {
-        "model_type": "lightgbm",
-        "auc_score": auc_score,
-        "optimal_threshold": threshold,
-        "optimal_cost": optimal_cost
-    }
-
+# --- ENDPOINT /predict ---
 @app.post("/predict")
-def predict(features: Features):
-    if len(features.features) != len(feature_names):
-        return JSONResponse(
-            status_code=400,
-            content={"error": f"Nombre de features incorrect ({len(features.features)} donné, {len(feature_names)} attendu)"}
-        )
-    X = np.array([features.features])
-    risk_score = model.predict_proba(X)[:,1][0]
-    decision = "ACCORD" if risk_score < threshold else "REFUS"
-    return {
-        "risk_score": risk_score,
-        "decision": decision,
-        "threshold": threshold
-    }
+def predict(data: Features):
+    X = np.array(data.features).reshape(1, -1)
+    risk_score = model.predict(X)[0]  # score entre 0 et 1
+    decision = "ACCORD" if risk_score < 0.09 else "REFUS"  # exemple de seuil
+    return {"risk_score": float(risk_score), "decision": decision}
 
+# --- ENDPOINT /explain ---
 @app.post("/explain")
-def explain(features: Features):
+def explain(data: Features):
     try:
-        if len(features.features) != len(feature_names):
-            return JSONResponse(
-                status_code=400,
-                content={"error": f"Nombre de features incorrect ({len(features.features)} donné, {len(feature_names)} attendu)"}
-            )
-
-        X = np.array([features.features])
+        X = np.array(data.features).reshape(1, -1)
         shap_values = explainer.shap_values(X)
-        top_idx = np.argsort(np.abs(shap_values[0]))[::-1][:10]
-        top_features = []
-        for idx in top_idx:
-            f_name = feature_names[idx]
-            impact = float(shap_values[0][idx])
-            direction = "AUGMENTE LE RISQUE" if impact > 0 else "DIMINUE LE RISQUE"
-            top_features.append({"feature": f_name, "impact": impact, "direction": direction})
 
-        return {
-            "top_features": top_features,
-            "interpretation": "Analyse SHAP générée avec succès"
-        }
+        # Pour LightGBM binaire : shap_values[1] correspond à la classe positive
+        if isinstance(shap_values, list):
+            shap_vals = shap_values[1]
+        else:
+            shap_vals = shap_values
+
+        # Obtenir les top 10 features les plus importantes
+        impact_abs = np.abs(shap_vals[0])
+        top_idx = np.argsort(impact_abs)[-10:][::-1]
+        top_features = [
+            {"feature": f"feature_{i}", "impact": float(shap_vals[0][i]),
+             "direction": "AUGMENTE LE RISQUE" if shap_vals[0][i] > 0 else "DIMINUE LE RISQUE"}
+            for i in top_idx
+        ]
+
+        return {"top_features": top_features, "interpretation": "Explication SHAP générée avec succès."}
+
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return {"detail": f"Erreur SHAP: {str(e)}"}
