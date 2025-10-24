@@ -1,0 +1,28 @@
+# Données sensibles
+*.csv
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+env/
+venv/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# MLflow
+mlruns/
+notebooks/mlruns/
+
+# Models (fichiers volumineux)
+models/*.pkl
+notebooks/models/*.pkl
+
+# Sorties
+visualizations/
+shap_analysis/
+reports/
+tests/
