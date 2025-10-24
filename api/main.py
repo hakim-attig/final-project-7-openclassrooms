@@ -9,9 +9,10 @@ app = FastAPI(
     version="1.0"
 )
 
+# Répertoire contenant les fichiers du modèle
 MODEL_DIR = "../models"
 
-# Chargement des modèles
+# Chargement des modèles et métadonnées
 try:
     model = joblib.load(f"{MODEL_DIR}/champion_model.pkl")
     threshold = joblib.load(f"{MODEL_DIR}/champion_threshold.pkl")
@@ -23,9 +24,11 @@ except Exception as e:
     print(f"Erreur modèle: {e}")
     model_loaded = False
 
+# Schéma pour la requête de prédiction
 class PredictionRequest(BaseModel):
     features: list[float]
 
+# Endpoints
 @app.get("/")
 def root():
     return {
@@ -72,7 +75,8 @@ def predict(request: PredictionRequest):
     
     return {
         "risk_score": float(proba),
-        "decision": decision
+        "decision": decision,
+        "threshold": float(threshold)
     }
 
 @app.post("/explain")
