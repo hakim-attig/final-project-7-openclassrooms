@@ -1,123 +1,70 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
+from typing import List
 import joblib
 import numpy as np
+import shap
 
-app = FastAPI(
-    title="API Scoring Crédit - Production",
-    description="API avec champion model (sans données clients)",
-    version="1.0"
-)
+# --- INITIALISATION DE L'API ---
+app = FastAPI(title="API Scoring Crédit", version="1.0")
 
-# Répertoire contenant les fichiers du modèle
-MODEL_DIR = "../models"
+# --- CHEMIN DU MODÈLE ---
+MODEL_PATH = "models/champion_model.pkl"  # ⚠️ Vérifie que ce chemin est correct par rapport à ton main.py
 
-# Chargement des modèles et métadonnées
-try:
-    model = joblib.load(f"{MODEL_DIR}/champion_model.pkl")
-    threshold = joblib.load(f"{MODEL_DIR}/champion_threshold.pkl")
-    feature_columns = joblib.load(f"{MODEL_DIR}/feature_columns.pkl")
-    metadata = joblib.load(f"{MODEL_DIR}/model_metadata.pkl")
-    print(f"✓ Modèle: {metadata['model_type']}, Seuil: {threshold:.3f}, Features: {len(feature_columns)}")
-    model_loaded = True
-except Exception as e:
-    print(f"Erreur modèle: {e}")
-    model_loaded = False
+# --- CHARGEMENT DU MODÈLE ---
+model = joblib.load(MODEL_PATH)
 
-# Schéma pour la requête de prédiction
-class PredictionRequest(BaseModel):
-    features: list[float]
+# --- CRÉATION DE L'EXPLAINER SHAP AU DÉMARRAGE ---
+explainer = shap.TreeExplainer(model)
 
-# Endpoints
-@app.get("/")
-def root():
-    return {
-        "api": "Scoring Crédit Production V2.0",
-        "model": metadata['model_type'] if model_loaded else "Non chargé",
-        "num_features": len(feature_columns) if model_loaded else 0,
-        "status": "OK" if model_loaded else "ERROR"
-    }
+# --- SCHÉMA DES FEATURES ---
+class Features(BaseModel):
+    features: List[float]
 
+# --- ENDPOINT /status ---
 @app.get("/status")
-def health_check():
-    return {
-        "status": "operational" if model_loaded else "error",
-        "model_loaded": model_loaded
-    }
+def status():
+    return {"status": "operational"}
 
-@app.get("/model/info")
-def model_info():
-    if not model_loaded:
-        raise HTTPException(status_code=500, detail="Modèle non chargé")
-    return {
-        "model_type": metadata['model_type'],
-        "auc_score": float(metadata['auc_score']),
-        "optimal_threshold": float(threshold),
-        "optimal_cost": float(metadata['optimal_cost']),
-        "num_features": len(feature_columns),
-        "training_date": metadata['training_date']
-    }
-
+# --- ENDPOINT /predict ---
 @app.post("/predict")
-def predict(request: PredictionRequest):
-    if not model_loaded:
-        raise HTTPException(status_code=500, detail="Service non disponible")
-    
-    if len(request.features) != len(feature_columns):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Nombre de features incorrect. Attendu: {len(feature_columns)}, Reçu: {len(request.features)}"
-        )
-    
-    features_array = np.array(request.features).reshape(1, -1)
-    proba = model.predict_proba(features_array)[0, 1]
-    decision = "REFUS" if proba >= threshold else "ACCORD"
-    
-    return {
-        "risk_score": float(proba),
-        "decision": decision,
-        "threshold": float(threshold)
-    }
-
-@app.post("/explain")
-def explain_prediction(request: PredictionRequest):
-    """Retourne les features les plus importantes pour cette prédiction"""
-    if not model_loaded:
-        raise HTTPException(status_code=500, detail="Service non disponible")
-    
-    if len(request.features) != len(feature_columns):
-        raise HTTPException(status_code=400, detail="Nombre de features incorrect")
-    
+def predict(data: Features):
     try:
-        import shap
-        explainer = joblib.load(f"{MODEL_DIR}/shap_explainer.pkl")
-        features_array = np.array(request.features).reshape(1, -1)
-        shap_values = explainer.shap_values(features_array)
-        
-        if isinstance(shap_values, list):
-            shap_values = shap_values[1][0]
-        else:
-            shap_values = shap_values[0]
-        
-        feature_impact = list(zip(feature_columns, shap_values, request.features))
-        feature_impact.sort(key=lambda x: abs(x[1]), reverse=True)
-        
-        top_features = []
-        for feat, impact, value in feature_impact[:10]:
-            top_features.append({
-                "feature": feat,
-                "impact": float(impact),
-                "value": float(value),
-                "direction": "AUGMENTE LE RISQUE" if impact > 0 else "DIMINUE LE RISQUE"
-            })
-        
-        return {
-            "top_features": top_features,
-            "interpretation": "Impact positif = augmente le risque de défaut | Impact négatif = diminue le risque"
-        }
+        # S'assurer que toutes les features sont des floats
+        features = [float(x) for x in data.features]
+        X = np.array(features).reshape(1, -1)
+        risk_score = model.predict_proba(X)[:,1][0]  # Score entre 0 et 1
+        decision = "ACCORD" if risk_score < 0.09 else "REFUS"  # Seuil exemple
+        return {"risk_score": float(risk_score), "decision": decision}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur SHAP: {str(e)}")
+        return {"detail": f"Erreur prediction: {str(e)}"}
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# --- ENDPOINT /explain ---
+@app.post("/explain")
+def explain(data: Features):
+    try:
+        features = [float(x) for x in data.features]
+        X = np.array(features).reshape(1, -1)
+        shap_values = explainer.shap_values(X)
+
+        # Pour LightGBM binaire : shap_values[1] correspond à la classe positive
+        if isinstance(shap_values, list):
+            shap_vals = shap_values[1]
+        else:
+            shap_vals = shap_values
+
+        # Top 10 features les plus importantes
+        impact_abs = np.abs(shap_vals[0])
+        top_idx = np.argsort(impact_abs)[-10:][::-1]
+        top_features = [
+            {
+                "feature": f"feature_{i}",
+                "impact": float(shap_vals[0][i]),
+                "direction": "AUGMENTE LE RISQUE" if shap_vals[0][i] > 0 else "DIMINUE LE RISQUE"
+            }
+            for i in top_idx
+        ]
+
+        return {"top_features": top_features, "interpretation": "Explication SHAP générée avec succès."}
+    except Exception as e:
+        return {"detail": f"Erreur SHAP: {str(e)}"}
