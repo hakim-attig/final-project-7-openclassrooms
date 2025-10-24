@@ -2,77 +2,78 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import joblib
 import numpy as np
-import os
+from pathlib import Path
 
+# --- INITIALISATION DE L'API ---
 app = FastAPI(
     title="API Scoring Crédit - Production",
-    description="API avec modèle champion et seuil optimal",
+    description="API avec champion model et seuil optimal",
     version="2.0"
 )
 
-# Répertoire contenant les fichiers du modèle
-MODEL_DIR = "models"  # adapte à ton cas ("../models" si besoin)
+# --- CHEMIN DU RÉPERTOIRE MODELS ---
+MODEL_DIR = Path(__file__).parent.parent / "models"
 
-# Chargement conditionnel du modèle
+# --- VARIABLES GLOBALES ---
 model_loaded = False
 model = None
 threshold = None
-feature_columns = []
-metadata = {}
+feature_columns = None
+metadata = None
+explainer = None
 
-# --- Chargement du modèle uniquement si les fichiers existent ---
-required_files = [
-    "champion_model.pkl",
-    "champion_threshold.pkl",
-    "feature_columns.pkl",
-    "model_metadata.pkl"
-]
+# --- CHARGEMENT DU MODÈLE AU DÉMARRAGE ---
+try:
+    model_path = MODEL_DIR / "champion_model.pkl"
+    threshold_path = MODEL_DIR / "champion_threshold.pkl"
+    feature_columns_path = MODEL_DIR / "feature_columns.pkl"
+    metadata_path = MODEL_DIR / "model_metadata.pkl"
+    shap_explainer_path = MODEL_DIR / "shap_explainer.pkl"
 
-missing = [f for f in required_files if not os.path.exists(f"{MODEL_DIR}/{f}")]
-if missing:
-    print(f"⚠️ Fichiers manquants : {missing}")
-    print("→ L’API démarre en mode dégradé (sans modèle).")
-else:
-    try:
-        model = joblib.load(f"{MODEL_DIR}/champion_model.pkl")
-        threshold = joblib.load(f"{MODEL_DIR}/champion_threshold.pkl")
-        feature_columns = joblib.load(f"{MODEL_DIR}/feature_columns.pkl")
-        metadata = joblib.load(f"{MODEL_DIR}/model_metadata.pkl")
+    # Vérifier que tous les fichiers existent
+    for f in [model_path, threshold_path, feature_columns_path, metadata_path, shap_explainer_path]:
+        if not f.exists():
+            raise FileNotFoundError(f"Fichier introuvable : {f}")
 
-        print(f"✓ Modèle chargé : {metadata['model_type']} | Seuil optimal : {threshold:.3f}")
-        model_loaded = True
-    except Exception as e:
-        print(f"❌ Erreur lors du chargement du modèle : {e}")
+    model = joblib.load(model_path)
+    threshold = joblib.load(threshold_path)
+    feature_columns = joblib.load(feature_columns_path)
+    metadata = joblib.load(metadata_path)
+    explainer = joblib.load(shap_explainer_path)
 
-# --- Schéma de données pour les prédictions ---
+    model_loaded = True
+    print(f"✓ Modèle chargé : {metadata['model_type']}, seuil={threshold}, features={len(feature_columns)}")
+
+except Exception as e:
+    print(f"Erreur au chargement du modèle : {e}")
+    model_loaded = False
+
+# --- SCHÉMA DES FEATURES ---
 class PredictionRequest(BaseModel):
     features: list[float]
 
-# --- Endpoints ---
+# --- ENDPOINTS ---
+
 @app.get("/")
 def root():
-    """Informations générales sur l’API"""
     return {
         "api": "Scoring Crédit Production V2.0",
-        "model": metadata.get('model_type', 'Non chargé'),
-        "num_features": len(feature_columns),
-        "threshold": float(threshold) if threshold else None,
-        "status": "OK" if model_loaded else "MODE DÉGRADÉ"
+        "model": metadata['model_type'] if model_loaded else "Non chargé",
+        "num_features": len(feature_columns) if model_loaded else 0,
+        "status": "OK" if model_loaded else "ERROR"
     }
 
 @app.get("/status")
 def health_check():
-    """Vérifie la disponibilité du modèle"""
     return {
-        "status": "operational" if model_loaded else "degraded",
+        "status": "operational" if model_loaded else "error",
         "model_loaded": model_loaded
     }
 
 @app.get("/model/info")
 def model_info():
-    """Retourne les métadonnées du modèle"""
     if not model_loaded:
-        raise HTTPException(status_code=503, detail="Modèle non chargé")
+        raise HTTPException(status_code=500, detail="Modèle non chargé")
     return {
         "model_type": metadata['model_type'],
         "auc_score": float(metadata['auc_score']),
@@ -84,62 +85,61 @@ def model_info():
 
 @app.post("/predict")
 def predict(request: PredictionRequest):
-    """Retourne la probabilité de risque et la décision"""
     if not model_loaded:
-        raise HTTPException(status_code=503, detail="Modèle non disponible")
-
+        raise HTTPException(status_code=500, detail="Service non disponible")
     if len(request.features) != len(feature_columns):
         raise HTTPException(
             status_code=400,
-            detail=f"Nombre de features incorrect : {len(request.features)} reçues, {len(feature_columns)} attendues."
+            detail=f"Nombre de features incorrect. Attendu: {len(feature_columns)}, Reçu: {len(request.features)}"
         )
-
-    X = np.array(request.features).reshape(1, -1)
-    proba = model.predict_proba(X)[0, 1]
-    decision = "REFUS" if proba >= threshold else "ACCORD"
-
-    return {
-        "risk_score": float(proba),
-        "decision": decision,
-        "threshold": float(threshold)
-    }
+    try:
+        features_array = np.array(request.features).reshape(1, -1)
+        proba = model.predict_proba(features_array)[0, 1]
+        decision = "REFUS" if proba >= threshold else "ACCORD"
+        return {
+            "risk_score": float(proba),
+            "decision": decision,
+            "threshold": float(threshold)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur prediction: {str(e)}")
 
 @app.post("/explain")
 def explain_prediction(request: PredictionRequest):
-    """Explique la prédiction via SHAP"""
     if not model_loaded:
-        raise HTTPException(status_code=503, detail="Modèle non disponible")
-
+        raise HTTPException(status_code=500, detail="Service non disponible")
+    if len(request.features) != len(feature_columns):
+        raise HTTPException(status_code=400, detail="Nombre de features incorrect")
     try:
-        import shap
-        explainer = joblib.load(f"{MODEL_DIR}/shap_explainer.pkl")
-        X = np.array(request.features).reshape(1, -1)
-        shap_values = explainer.shap_values(X)
-        shap_values = shap_values[1][0] if isinstance(shap_values, list) else shap_values[0]
+        features_array = np.array(request.features).reshape(1, -1)
+        shap_values = explainer.shap_values(features_array)
 
-        feature_impact = sorted(
-            zip(feature_columns, shap_values, request.features),
-            key=lambda x: abs(x[1]),
-            reverse=True
-        )
+        if isinstance(shap_values, list):
+            shap_vals = shap_values[1][0]  # classe positive
+        else:
+            shap_vals = shap_values[0]
 
-        top_features = [
-            {
+        feature_impact = list(zip(feature_columns, shap_vals, request.features))
+        feature_impact.sort(key=lambda x: abs(x[1]), reverse=True)
+
+        top_features = []
+        for feat, impact, value in feature_impact[:10]:
+            top_features.append({
                 "feature": feat,
                 "impact": float(impact),
                 "value": float(value),
                 "direction": "AUGMENTE LE RISQUE" if impact > 0 else "DIMINUE LE RISQUE"
-            }
-            for feat, impact, value in feature_impact[:10]
-        ]
+            })
 
         return {
             "top_features": top_features,
             "interpretation": "Impact positif = augmente le risque de défaut | Impact négatif = diminue le risque"
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur SHAP : {str(e)}")
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur SHAP: {str(e)}")
+
+# --- POUR LANCER LOCALEMENT ---
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
