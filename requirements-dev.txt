@@ -15,7 +15,7 @@ pydantic==2.3.0
 matplotlib==3.7.2
 seaborn==0.12.2
 plotly==5.16.1
-shap==0.42.1
+shap==0.48.0
 
 # Tracking et Monitoring
 mlflow==2.7.1
