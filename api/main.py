@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from typing import List
 import joblib
 import numpy as np
+import shap
 from pathlib import Path
 
 # --- INITIALISATION DE L'API ---
@@ -50,7 +52,7 @@ except Exception as e:
 
 # --- SCHÉMA DES FEATURES ---
 class PredictionRequest(BaseModel):
-    features: list[float]
+    features: List[float]
 
 # --- ENDPOINTS ---
 
