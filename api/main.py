@@ -4,27 +4,27 @@ from typing import List
 import joblib
 import numpy as np
 from pathlib import Path
-import os
 
-# ============================================================
 # --- INITIALISATION DE L'API ---
-# ============================================================
 app = FastAPI(
     title="API Scoring Crédit - Production",
     description="API avec champion model et seuil optimal",
     version="2.0"
 )
 
-# ============================================================
-# --- CHEMIN DU RÉPERTOIRE MODELS (sécurisé pour Render) ---
-# ============================================================
-# On prend le répertoire courant (repo cloné) + api/models
-MODEL_DIR = Path(os.getcwd()) / "api" / "models"
-print("MODEL_DIR:", MODEL_DIR.resolve())
+# --- CHEMIN DU RÉPERTOIRE MODELS ---
+# Supporte local et Render
+MODEL_DIR = Path(__file__).parent / "models"
 
-# ============================================================
+print("MODEL_DIR:", MODEL_DIR)
+if MODEL_DIR.exists():
+    print("Fichiers dans le dossier models:")
+    for f in MODEL_DIR.iterdir():
+        print("-", f.name)
+else:
+    print("❌ Dossier models introuvable !")
+
 # --- VARIABLES GLOBALES ---
-# ============================================================
 model_loaded = False
 model = None
 threshold = None
@@ -32,9 +32,7 @@ feature_columns = None
 metadata = None
 explainer = None
 
-# ============================================================
 # --- CHARGEMENT DU MODÈLE AU DÉMARRAGE ---
-# ============================================================
 try:
     model_path = MODEL_DIR / "champion_model.pkl"
     threshold_path = MODEL_DIR / "champion_threshold.pkl"
@@ -47,7 +45,6 @@ try:
     if missing_files:
         raise FileNotFoundError(f"Fichiers manquants dans models : {missing_files}")
 
-    # Chargement
     model = joblib.load(model_path)
     threshold = joblib.load(threshold_path)
     feature_columns = joblib.load(feature_columns_path)
@@ -61,15 +58,11 @@ except Exception as e:
     print(f"❌ Erreur au chargement du modèle : {e}")
     model_loaded = False
 
-# ============================================================
 # --- SCHÉMA DES FEATURES ---
-# ============================================================
 class PredictionRequest(BaseModel):
     features: List[float]
 
-# ============================================================
 # --- ENDPOINTS ---
-# ============================================================
 
 @app.get("/")
 def root():
@@ -153,9 +146,7 @@ def explain_prediction(request: PredictionRequest):
         "interpretation": "Impact positif = augmente le risque de défaut | Impact négatif = diminue le risque"
     }
 
-# ============================================================
 # --- POUR LANCER LOCALEMENT ---
-# ============================================================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
