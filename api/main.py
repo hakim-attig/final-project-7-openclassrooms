@@ -14,14 +14,15 @@ app = FastAPI(
 )
 
 # --- CHEMIN DU RÉPERTOIRE MODELS ---
-MODEL_DIR = Path(__file__).parent.parent / "models"
+# Pour Render, les fichiers .pkl sont dans api/models/
+MODEL_DIR = Path(__file__).parent / "models"
 
 # --- VARIABLES GLOBALES ---
 model_loaded = False
 model = None
 threshold = None
-feature_columns = None
-metadata = None
+feature_columns = []
+metadata = {}
 explainer = None
 
 # --- CHARGEMENT DU MODÈLE AU DÉMARRAGE ---
@@ -44,7 +45,7 @@ try:
     explainer = joblib.load(shap_explainer_path)
 
     model_loaded = True
-    print(f"✓ Modèle chargé : {metadata['model_type']}, seuil={threshold}, features={len(feature_columns)}")
+    print(f"✓ Modèle chargé : {metadata.get('model_type','Unknown')}, seuil={threshold}, features={len(feature_columns)}")
 
 except Exception as e:
     print(f"Erreur au chargement du modèle : {e}")
@@ -60,7 +61,7 @@ class PredictionRequest(BaseModel):
 def root():
     return {
         "api": "Scoring Crédit Production V2.0",
-        "model": metadata['model_type'] if model_loaded else "Non chargé",
+        "model": metadata.get('model_type', "Non chargé") if model_loaded else "Non chargé",
         "num_features": len(feature_columns) if model_loaded else 0,
         "status": "OK" if model_loaded else "ERROR"
     }
