@@ -14,15 +14,14 @@ app = FastAPI(
 )
 
 # --- CHEMIN DU RÉPERTOIRE MODELS ---
-# Pour Render, les fichiers .pkl sont dans api/models/
 MODEL_DIR = Path(__file__).parent / "models"
 
 # --- VARIABLES GLOBALES ---
 model_loaded = False
 model = None
 threshold = None
-feature_columns = []
-metadata = {}
+feature_columns = None
+metadata = None
 explainer = None
 
 # --- CHARGEMENT DU MODÈLE AU DÉMARRAGE ---
@@ -45,7 +44,7 @@ try:
     explainer = joblib.load(shap_explainer_path)
 
     model_loaded = True
-    print(f"✓ Modèle chargé : {metadata.get('model_type','Unknown')}, seuil={threshold}, features={len(feature_columns)}")
+    print(f"✓ Modèle chargé : {metadata['model_type']}, seuil={threshold}, features={len(feature_columns)}")
 
 except Exception as e:
     print(f"Erreur au chargement du modèle : {e}")
@@ -61,8 +60,8 @@ class PredictionRequest(BaseModel):
 def root():
     return {
         "api": "Scoring Crédit Production V2.0",
-        "model": metadata.get('model_type', "Non chargé") if model_loaded else "Non chargé",
-        "num_features": len(feature_columns) if model_loaded else 0,
+        "model": metadata['model_type'] if model_loaded else "Non chargé",
+        "num_features": len(feature_columns) if model_loaded and feature_columns else 0,
         "status": "OK" if model_loaded else "ERROR"
     }
 
@@ -75,7 +74,7 @@ def health_check():
 
 @app.get("/model/info")
 def model_info():
-    if not model_loaded:
+    if not model_loaded or feature_columns is None:
         raise HTTPException(status_code=500, detail="Modèle non chargé")
     return {
         "model_type": metadata['model_type'],
@@ -88,7 +87,7 @@ def model_info():
 
 @app.post("/predict")
 def predict(request: PredictionRequest):
-    if not model_loaded:
+    if not model_loaded or feature_columns is None:
         raise HTTPException(status_code=500, detail="Service non disponible")
     if len(request.features) != len(feature_columns):
         raise HTTPException(
@@ -109,7 +108,7 @@ def predict(request: PredictionRequest):
 
 @app.post("/explain")
 def explain_prediction(request: PredictionRequest):
-    if not model_loaded:
+    if not model_loaded or feature_columns is None:
         raise HTTPException(status_code=500, detail="Service non disponible")
     if len(request.features) != len(feature_columns):
         raise HTTPException(status_code=400, detail="Nombre de features incorrect")
