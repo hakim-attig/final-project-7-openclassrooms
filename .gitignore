@@ -1,8 +1,12 @@
+# -------------------------
 # Données sensibles
+# -------------------------
 *.csv
 data/
 
-# Python
+# -------------------------
+# Environnements Python
+# -------------------------
 __pycache__/
 *.py[cod]
 .Python
@@ -10,18 +14,28 @@ env/
 venv/
 *.egg-info/
 
+# -------------------------
 # Jupyter
+# -------------------------
 .ipynb_checkpoints/
 
+# -------------------------
 # MLflow
+# -------------------------
 mlruns/
 notebooks/mlruns/
 
-# Models (fichiers volumineux)
-models/*.pkl
+# -------------------------
+# Modèles (fichiers volumineux)
+# -------------------------
+# Ignorer les modèles dans notebooks
 notebooks/models/*.pkl
+# Suivre explicitement les modèles dans api/models
+!api/models/*.pkl
 
-# Sorties
+# -------------------------
+# Sorties / Visualisations / Reports
+# -------------------------
 visualizations/
 shap_analysis/
 reports/
