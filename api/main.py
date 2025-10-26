@@ -4,18 +4,27 @@ from typing import List
 import joblib
 import numpy as np
 from pathlib import Path
+import os
 
+# ============================================================
 # --- INITIALISATION DE L'API ---
+# ============================================================
 app = FastAPI(
     title="API Scoring Crédit - Production",
     description="API avec champion model et seuil optimal",
     version="2.0"
 )
 
-# --- CHEMIN DU RÉPERTOIRE MODELS ---
-MODEL_DIR = Path(__file__).parent / "models"
+# ============================================================
+# --- CHEMIN DU RÉPERTOIRE MODELS (sécurisé pour Render) ---
+# ============================================================
+# On prend le répertoire courant (repo cloné) + api/models
+MODEL_DIR = Path(os.getcwd()) / "api" / "models"
+print("MODEL_DIR:", MODEL_DIR.resolve())
 
+# ============================================================
 # --- VARIABLES GLOBALES ---
+# ============================================================
 model_loaded = False
 model = None
 threshold = None
@@ -23,7 +32,9 @@ feature_columns = None
 metadata = None
 explainer = None
 
+# ============================================================
 # --- CHARGEMENT DU MODÈLE AU DÉMARRAGE ---
+# ============================================================
 try:
     model_path = MODEL_DIR / "champion_model.pkl"
     threshold_path = MODEL_DIR / "champion_threshold.pkl"
@@ -32,10 +43,11 @@ try:
     shap_explainer_path = MODEL_DIR / "shap_explainer.pkl"
 
     # Vérifier que tous les fichiers existent
-    for f in [model_path, threshold_path, feature_columns_path, metadata_path, shap_explainer_path]:
-        if not f.exists():
-            raise FileNotFoundError(f"Fichier introuvable : {f}")
+    missing_files = [f.name for f in [model_path, threshold_path, feature_columns_path, metadata_path, shap_explainer_path] if not f.exists()]
+    if missing_files:
+        raise FileNotFoundError(f"Fichiers manquants dans models : {missing_files}")
 
+    # Chargement
     model = joblib.load(model_path)
     threshold = joblib.load(threshold_path)
     feature_columns = joblib.load(feature_columns_path)
@@ -46,14 +58,18 @@ try:
     print(f"✓ Modèle chargé : {metadata['model_type']}, seuil={threshold}, features={len(feature_columns)}")
 
 except Exception as e:
-    print(f"Erreur au chargement du modèle : {e}")
+    print(f"❌ Erreur au chargement du modèle : {e}")
     model_loaded = False
 
+# ============================================================
 # --- SCHÉMA DES FEATURES ---
+# ============================================================
 class PredictionRequest(BaseModel):
     features: List[float]
 
+# ============================================================
 # --- ENDPOINTS ---
+# ============================================================
 
 @app.get("/")
 def root():
@@ -137,7 +153,9 @@ def explain_prediction(request: PredictionRequest):
         "interpretation": "Impact positif = augmente le risque de défaut | Impact négatif = diminue le risque"
     }
 
+# ============================================================
 # --- POUR LANCER LOCALEMENT ---
+# ============================================================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

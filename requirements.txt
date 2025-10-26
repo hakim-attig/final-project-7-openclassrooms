@@ -24,4 +24,7 @@ shap==0.42.1
 scipy>=1.11.4
 
 # Testing
-httpx
+httpx==0.24.1
+
+streamlit==1.30.0
+plotly==6.1.0
