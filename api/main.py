@@ -19,8 +19,8 @@ MODEL_DIR = Path(__file__).parent / "models"
 model_loaded = False
 model = None
 threshold = None
-feature_columns = []  # <-- initialisation sûre
-metadata = {}
+feature_columns = None
+metadata = None
 explainer = None
 
 # --- CHARGEMENT DU MODÈLE AU DÉMARRAGE ---
@@ -42,24 +42,24 @@ try:
     explainer = joblib.load(shap_explainer_path)
 
     model_loaded = True
-    print(f"✓ Modèle chargé : {metadata.get('model_type','?')}, seuil={threshold}, features={len(feature_columns)}")
+    print(f"✓ Modèle chargé : {metadata['model_type']}, seuil={threshold}, features={len(feature_columns)}")
 
 except Exception as e:
-    print(f"⚠ Erreur au chargement du modèle : {e}")
+    print(f"Erreur au chargement du modèle : {e}")
     model_loaded = False
-    feature_columns = []  # sécurité
 
 # --- SCHÉMA DES FEATURES ---
 class PredictionRequest(BaseModel):
     features: List[float]
 
 # --- ENDPOINTS ---
+
 @app.get("/")
 def root():
     return {
         "api": "Scoring Crédit Production V2.0",
-        "model": metadata.get('model_type', "Non chargé"),
-        "num_features": len(feature_columns),
+        "model": metadata['model_type'] if model_loaded else "Non chargé",
+        "num_features": len(feature_columns) if model_loaded else 0,
         "status": "OK" if model_loaded else "ERROR"
     }
 
@@ -75,63 +75,72 @@ def model_info():
     if not model_loaded:
         raise HTTPException(status_code=500, detail="Modèle non chargé")
     return {
-        "model_type": metadata.get('model_type', ""),
-        "auc_score": float(metadata.get('auc_score', 0)),
-        "optimal_threshold": float(threshold) if threshold else 0,
-        "optimal_cost": float(metadata.get('optimal_cost', 0)),
+        "model_type": metadata['model_type'],
+        "auc_score": float(metadata['auc_score']),
+        "optimal_threshold": float(threshold),
+        "optimal_cost": float(metadata['optimal_cost']),
         "num_features": len(feature_columns),
-        "training_date": metadata.get('training_date', "")
+        "training_date": metadata['training_date']
     }
 
 @app.post("/predict")
 def predict(request: PredictionRequest):
     if not model_loaded:
         raise HTTPException(status_code=500, detail="Service non disponible")
-    if len(request.features) != len(feature_columns):
+    if feature_columns is None or len(request.features) != len(feature_columns):
         raise HTTPException(
             status_code=400,
-            detail=f"Nombre de features incorrect. Attendu: {len(feature_columns)}, Reçu: {len(request.features)}"
+            detail=f"Nombre de features incorrect. Attendu: {len(feature_columns) if feature_columns else 'inconnu'}, Reçu: {len(request.features)}"
         )
-    features_array = np.array(request.features).reshape(1, -1)
-    proba = model.predict_proba(features_array)[0, 1]
-    decision = "REFUS" if proba >= threshold else "ACCORD"
-    return {
-        "risk_score": float(proba),
-        "decision": decision,
-        "threshold": float(threshold)
-    }
+    try:
+        features_array = np.array(request.features).reshape(1, -1)
+        proba = model.predict_proba(features_array)[0, 1]
+        decision = "REFUS" if proba >= threshold else "ACCORD"
+        return {
+            "risk_score": float(proba),
+            "decision": decision,
+            "threshold": float(threshold)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur prediction: {str(e)}")
 
 @app.post("/explain")
 def explain_prediction(request: PredictionRequest):
     if not model_loaded:
         raise HTTPException(status_code=500, detail="Service non disponible")
-    if len(request.features) != len(feature_columns):
+    if feature_columns is None or len(request.features) != len(feature_columns):
         raise HTTPException(
             status_code=400,
-            detail=f"Nombre de features incorrect. Attendu: {len(feature_columns)}, Reçu: {len(request.features)}"
+            detail=f"Nombre de features incorrect. Attendu: {len(feature_columns) if feature_columns else 'inconnu'}, Reçu: {len(request.features)}"
         )
-    features_array = np.array(request.features).reshape(1, -1)
-    shap_values = explainer.shap_values(features_array)
+    try:
+        features_array = np.array(request.features).reshape(1, -1)
+        shap_values = explainer.shap_values(features_array)
 
-    if isinstance(shap_values, list):
-        shap_vals = shap_values[1][0]  # classe positive
-    else:
-        shap_vals = shap_values[0]
+        if isinstance(shap_values, list):
+            shap_vals = shap_values[1][0]  # classe positive
+        else:
+            shap_vals = shap_values[0]
 
-    feature_impact = list(zip(feature_columns, shap_vals, request.features))
-    feature_impact.sort(key=lambda x: abs(x[1]), reverse=True)
+        feature_impact = list(zip(feature_columns, shap_vals, request.features))
+        feature_impact.sort(key=lambda x: abs(x[1]), reverse=True)
 
-    top_features = [{
-        "feature": feat,
-        "impact": float(impact),
-        "value": float(value),
-        "direction": "AUGMENTE LE RISQUE" if impact > 0 else "DIMINUE LE RISQUE"
-    } for feat, impact, value in feature_impact[:10]]
+        top_features = []
+        for feat, impact, value in feature_impact[:10]:
+            top_features.append({
+                "feature": feat,
+                "impact": float(impact),
+                "value": float(value),
+                "direction": "AUGMENTE LE RISQUE" if impact > 0 else "DIMINUE LE RISQUE"
+            })
 
-    return {
-        "top_features": top_features,
-        "interpretation": "Impact positif = augmente le risque de défaut | Impact négatif = diminue le risque"
-    }
+        return {
+            "top_features": top_features,
+            "interpretation": "Impact positif = augmente le risque de défaut | Impact négatif = diminue le risque"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur SHAP: {str(e)}")
 
 # --- POUR LANCER LOCALEMENT ---
 if __name__ == "__main__":
