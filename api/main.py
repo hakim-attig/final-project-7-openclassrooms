@@ -32,7 +32,6 @@ try:
     metadata_path = MODEL_DIR / "model_metadata.pkl"
     shap_explainer_path = MODEL_DIR / "shap_explainer.pkl"
 
-    # Vérifier que tous les fichiers existent
     for f in [model_path, threshold_path, feature_columns_path, metadata_path, shap_explainer_path]:
         if not f.exists():
             raise FileNotFoundError(f"Fichier introuvable : {f}")
@@ -61,7 +60,7 @@ def root():
     return {
         "api": "Scoring Crédit Production V2.0",
         "model": metadata['model_type'] if model_loaded else "Non chargé",
-        "num_features": len(feature_columns) if model_loaded and feature_columns else 0,
+        "num_features": len(feature_columns) if model_loaded else 0,
         "status": "OK" if model_loaded else "ERROR"
     }
 
@@ -74,7 +73,7 @@ def health_check():
 
 @app.get("/model/info")
 def model_info():
-    if not model_loaded or feature_columns is None:
+    if not model_loaded:
         raise HTTPException(status_code=500, detail="Modèle non chargé")
     return {
         "model_type": metadata['model_type'],
@@ -88,12 +87,14 @@ def model_info():
 @app.post("/predict")
 def predict(request: PredictionRequest):
     if not model_loaded or feature_columns is None:
-        raise HTTPException(status_code=500, detail="Service non disponible")
+        raise HTTPException(status_code=500, detail="Service non disponible ou modèle non chargé")
+
     if len(request.features) != len(feature_columns):
         raise HTTPException(
             status_code=400,
             detail=f"Nombre de features incorrect. Attendu: {len(feature_columns)}, Reçu: {len(request.features)}"
         )
+
     try:
         features_array = np.array(request.features).reshape(1, -1)
         proba = model.predict_proba(features_array)[0, 1]
@@ -109,9 +110,11 @@ def predict(request: PredictionRequest):
 @app.post("/explain")
 def explain_prediction(request: PredictionRequest):
     if not model_loaded or feature_columns is None:
-        raise HTTPException(status_code=500, detail="Service non disponible")
+        raise HTTPException(status_code=500, detail="Service non disponible ou modèle non chargé")
+
     if len(request.features) != len(feature_columns):
         raise HTTPException(status_code=400, detail="Nombre de features incorrect")
+
     try:
         features_array = np.array(request.features).reshape(1, -1)
         shap_values = explainer.shap_values(features_array)
