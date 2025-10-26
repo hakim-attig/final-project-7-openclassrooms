@@ -18,7 +18,7 @@ python-multipart==0.0.6
 requests>=2.32.0
 
 # SHAP for interpretability
-shap==0.42.1
+shap==0.48.0
 
 # Additional dependencies
 scipy>=1.11.4
