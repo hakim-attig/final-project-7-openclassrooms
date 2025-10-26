@@ -31,6 +31,7 @@ try:
     metadata_path = MODEL_DIR / "model_metadata.pkl"
     shap_explainer_path = MODEL_DIR / "shap_explainer.pkl"
 
+    # Vérifier que tous les fichiers existent
     for f in [model_path, threshold_path, feature_columns_path, metadata_path, shap_explainer_path]:
         if not f.exists():
             raise FileNotFoundError(f"Fichier introuvable : {f}")
@@ -72,7 +73,7 @@ def health_check():
 
 @app.get("/model/info")
 def model_info():
-    if not model_loaded:
+    if not model_loaded or metadata is None:
         raise HTTPException(status_code=500, detail="Modèle non chargé")
     return {
         "model_type": metadata['model_type'],
@@ -85,62 +86,56 @@ def model_info():
 
 @app.post("/predict")
 def predict(request: PredictionRequest):
-    if not model_loaded:
+    if not model_loaded or feature_columns is None:
         raise HTTPException(status_code=500, detail="Service non disponible")
-    if feature_columns is None or len(request.features) != len(feature_columns):
+
+    if len(request.features) != len(feature_columns):
         raise HTTPException(
             status_code=400,
-            detail=f"Nombre de features incorrect. Attendu: {len(feature_columns) if feature_columns else 'inconnu'}, Reçu: {len(request.features)}"
+            detail=f"Nombre de features incorrect. Attendu: {len(feature_columns)}, Reçu: {len(request.features)}"
         )
-    try:
-        features_array = np.array(request.features).reshape(1, -1)
-        proba = model.predict_proba(features_array)[0, 1]
-        decision = "REFUS" if proba >= threshold else "ACCORD"
-        return {
-            "risk_score": float(proba),
-            "decision": decision,
-            "threshold": float(threshold)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur prediction: {str(e)}")
+
+    features_array = np.array(request.features).reshape(1, -1)
+    proba = model.predict_proba(features_array)[0, 1]
+    decision = "REFUS" if proba >= threshold else "ACCORD"
+    return {
+        "risk_score": float(proba),
+        "decision": decision,
+        "threshold": float(threshold)
+    }
 
 @app.post("/explain")
 def explain_prediction(request: PredictionRequest):
-    if not model_loaded:
+    if not model_loaded or feature_columns is None:
         raise HTTPException(status_code=500, detail="Service non disponible")
-    if feature_columns is None or len(request.features) != len(feature_columns):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Nombre de features incorrect. Attendu: {len(feature_columns) if feature_columns else 'inconnu'}, Reçu: {len(request.features)}"
-        )
-    try:
-        features_array = np.array(request.features).reshape(1, -1)
-        shap_values = explainer.shap_values(features_array)
 
-        if isinstance(shap_values, list):
-            shap_vals = shap_values[1][0]  # classe positive
-        else:
-            shap_vals = shap_values[0]
+    if len(request.features) != len(feature_columns):
+        raise HTTPException(status_code=400, detail="Nombre de features incorrect")
 
-        feature_impact = list(zip(feature_columns, shap_vals, request.features))
-        feature_impact.sort(key=lambda x: abs(x[1]), reverse=True)
+    features_array = np.array(request.features).reshape(1, -1)
+    shap_values = explainer.shap_values(features_array)
 
-        top_features = []
-        for feat, impact, value in feature_impact[:10]:
-            top_features.append({
-                "feature": feat,
-                "impact": float(impact),
-                "value": float(value),
-                "direction": "AUGMENTE LE RISQUE" if impact > 0 else "DIMINUE LE RISQUE"
-            })
+    if isinstance(shap_values, list):
+        shap_vals = shap_values[1][0]  # classe positive
+    else:
+        shap_vals = shap_values[0]
 
-        return {
-            "top_features": top_features,
-            "interpretation": "Impact positif = augmente le risque de défaut | Impact négatif = diminue le risque"
-        }
+    feature_impact = list(zip(feature_columns, shap_vals, request.features))
+    feature_impact.sort(key=lambda x: abs(x[1]), reverse=True)
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur SHAP: {str(e)}")
+    top_features = []
+    for feat, impact, value in feature_impact[:10]:
+        top_features.append({
+            "feature": feat,
+            "impact": float(impact),
+            "value": float(value),
+            "direction": "AUGMENTE LE RISQUE" if impact > 0 else "DIMINUE LE RISQUE"
+        })
+
+    return {
+        "top_features": top_features,
+        "interpretation": "Impact positif = augmente le risque de défaut | Impact négatif = diminue le risque"
+    }
 
 # --- POUR LANCER LOCALEMENT ---
 if __name__ == "__main__":
